@@ -2,265 +2,467 @@
 
 # ShackPulse
 
-### A corporate-style internal project tracker, shipped to Azure AKS with a production-grade Azure DevOps pipeline
+### A corporate-style project portfolio, deployed with Azure AKS and Azure DevOps
 
-**Azure DevOps** · **AKS** · **Gateway API** · **Cilium** · **Key Vault** · **Azure PostgreSQL** · **Trivy** · **cert-manager**
+![Azure DevOps](https://img.shields.io/badge/Azure_DevOps-CI%2FCD-0078D7?logo=azuredevops&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/AKS-Kubernetes-326CE5?logo=kubernetes&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Containers-2496ED?logo=docker&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232A)
+![Node.js](https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white)
 
----
+**React + Node.js + PostgreSQL application running on AKS with Dev and Prod environments, secure secret management, automated testing, container scanning, and approval-based deployments.**
 
-## 📌 What is this project?
+[Quick Start](#quick-start) · [Architecture](#architecture) · [CI/CD](#cicd-pipeline) · [Azure Infrastructure](#azure-infrastructure) · [Local Development](#local-development)
 
-Every company has an internal portal that answers the same questions every week: *Which projects are running? Which client is each one for? Who owns it? Is it on track? When is it due?*
-
-**ShackPulse** is that portal. We built it the way such tools are built inside real companies, and we deploy it the way a real platform team would: infrastructure from a script, images scanned before they reach the registry, secrets kept in Key Vault, and nothing reaching production without a human approving it.
-
-Most DevOps tutorials deploy a "Hello World" or a to-do app. You can't learn how production works from those, because they have none of the moving parts a real application has. ShackPulse has all of them: login and roles, a real database, an access-request workflow, a dev and a prod environment, HTTPS on a custom domain, and a pipeline with quality gates.
-
-> 🎥 The full build, from an empty Azure subscription to a live app on Dev and Prod, is on the [DevOps Shack YouTube channel](https://www.youtube.com/@devopsshack).
+</div>
 
 ---
 
-## ✨ What the application does
+## Overview
 
-ShackPulse is a three-tier web app: a React front end, a Node.js API and a PostgreSQL database.
+ShackPulse is a corporate-style internal project management portal for tracking projects, clients, team members, budgets, progress, milestones, health status, and access requests.
 
-- **Projects:** each project has its client, owner, health, priority, progress, budget, milestones, time entries and status updates. Projects can be exported as CSV.
-- **Clients:** every client company, with its points of contact and the projects we run for it.
-- **People:** who works on what, with their title and department.
-- **Dashboard:** portfolio health at a glance, with charts.
-- **Roles:** Admin, Project Manager, Member and Viewer, each seeing and doing only what the role allows.
-- **Access requests:** a new team member signs up with their company email, and the account stays *pending* until an admin approves it and picks a role. This is exactly how internal tools are onboarded in companies.
-- **Operations endpoints:** `/healthz` and `/readyz` for Kubernetes probes, `/metrics` for Prometheus-style metrics, and structured JSON logs.
+It demonstrates how to build and operate a complete application on Azure rather than deploying a basic hello-world example:
+
+- React 19 frontend with Vite
+- Node.js 22 and Express 5 API
+- PostgreSQL database
+- Docker-based delivery
+- Azure Kubernetes Service for Dev and Prod workloads
+- Azure DevOps CI/CD with environment approvals
+- Trivy security scans and npm audits
+- Azure Key Vault for sensitive values
+- Gateway API, Cilium, cert-manager, autoscaling, and network policies
+
+> This repository is for hands-on implementation and portfolio demonstration. Production secrets and Azure resources are not included.
 
 ---
 
-## 🏗 Architecture
+## Features
 
-Everything lives in one Azure resource group. The app runs on AKS in two namespaces, `shackpulse-dev` and `shackpulse-prod`. A single shared Gateway in front of them serves both hostnames over HTTPS.
+### Application
+
+- Project, client, people, and milestone management
+- Portfolio dashboard with project-health visibility
+- Budget, priority, progress, and due-date tracking
+- CSV project export
+- Structured health and metrics endpoints
+- Role-based access: Admin, Project Manager, Member, and Viewer
+- Admin approval workflow for pending access requests
+
+### Platform
+
+- Separate AKS namespaces for Dev and Prod
+- Managed Azure PostgreSQL outside the Kubernetes cluster
+- Shared Gateway API entry point with hostname routing
+- Automatic TLS with cert-manager and Let's Encrypt
+- Horizontal Pod Autoscaling and Pod Disruption Budgets
+- Default-deny network policies
+- Centralized logs and metrics with Container Insights
+- Traceable container images tagged by pipeline build and labelled with source metadata
+
+---
+
+## Tech Stack
+
+| Area | Technologies |
+|---|---|
+| Frontend | React 19, Vite, CSS, Nginx, React Router |
+| Backend | Node.js 22, Express 5, JWT, Zod |
+| Database | PostgreSQL 16 |
+| Testing | Jest, Supertest, Vitest, Testing Library, oxlint |
+| Containers | Docker, Docker Compose, Azure Container Registry |
+| Kubernetes | Azure Kubernetes Service, Cilium, Gateway API, Kustomize |
+| Kubernetes Operations | HPA, PDB, network policies, HTTPS redirects |
+| CI/CD | Azure Repos, Azure Pipelines YAML, self-hosted Azure agent |
+| Security | Trivy, npm audit, Azure Key Vault, RBAC-style application roles |
+| Networking | Azure DNS, cert-manager, Let's Encrypt |
+| Observability | Azure Log Analytics, Container Insights, Prometheus-style `/metrics`, JSON logs |
+
+---
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    U(["👤 Users"])
+    U([Users]) --> DNS[Azure DNS]
+    DNS --> GW[Shared Gateway API\nTLS via cert-manager]
 
-    subgraph AZ["☁️ Azure · resource group rg-devopsshack-shackpulse"]
-        DNS["🌐 Azure DNS<br/>shackpulse.&lt;domain&gt;<br/>shackpulse-dev.&lt;domain&gt;"]
+    subgraph AKS[Azure Kubernetes Service]
+        GW -->|Dev hostname| WD[React + Nginx]
+        GW -->|Prod hostname| WP[React + Nginx]
 
-        subgraph AKS["☸️ AKS · Cilium overlay · Gateway API · Cluster Autoscaler"]
-            GW["🚪 Shared Gateway<br/>ns shackpulse-gateway<br/>TLS by cert-manager"]
-            subgraph DEV["ns shackpulse-dev"]
-                WD["web · React + nginx"] --> AD["api · Node.js"]
-            end
-            subgraph PROD["ns shackpulse-prod"]
-                WP["web · React + nginx"] --> AP["api · Node.js"]
-            end
+        WD --> AD[Node.js API]
+        WP --> AP[Node.js API]
+
+        subgraph DEV[shackpulse-dev]
+            WD
+            AD
         end
 
-        PG[("🐘 Azure Database<br/>for PostgreSQL<br/>shackpulse_dev · shackpulse_prod")]
-        ACR["📦 Azure Container<br/>Registry"]
-        KV["🔐 Azure Key Vault"]
-        LAW["📊 Log Analytics<br/>Container Insights"]
+        subgraph PROD[shackpulse-prod]
+            WP
+            AP
+        end
     end
 
-    U --> DNS --> GW
-    GW -->|"https-dev"| WD
-    GW -->|"https-prod"| WP
-    AD --> PG
-    AP --> PG
-    ACR -. "image pull (AcrPull)" .-> AKS
-    KV -. "secrets via pipeline" .-> AKS
-    AKS -. "logs & metrics" .-> LAW
+    AD --> PG[(Azure PostgreSQL\nshackpulse_dev)]
+    AP --> PG2[(Azure PostgreSQL\nshackpulse_prod)]
 
-    classDef azure fill:#e8f1fb,stroke:#0078d4,color:#0b2a4a
-    classDef k8s fill:#eef2ff,stroke:#326ce5,color:#1e1b4b
-    classDef data fill:#ecfdf5,stroke:#059669,color:#064e3b
-    classDef user fill:#fff7ed,stroke:#ea580c,color:#7c2d12
-    class DNS,ACR,KV,LAW azure
-    class GW,WD,AD,WP,AP k8s
-    class PG data
-    class U user
+    ACR[Azure Container Registry] -. image pull .-> AKS
+    KV[Azure Key Vault] -. pipeline secrets .-> AKS
+    AKS -. logs and metrics .-> LAW[Log Analytics]
 ```
 
-**Why the database sits outside the cluster.** We run PostgreSQL as a managed Azure service, not as a pod. Microsoft handles backups, patching and version upgrades, and the data survives even if we delete and rebuild the whole cluster. One server holds two databases, each with its own login, so dev can never read prod data.
+### Request Flow
 
-**Why the shared Gateway.** With Gateway API we run one Gateway with one public IP and give it a listener per hostname. Each environment attaches its own `HTTPRoute`, so dev and prod are routed independently while sharing the same entry point and certificates.
+1. Azure DNS resolves the Dev or Prod hostname to the shared Gateway address.
+2. The Gateway terminates TLS and uses an `HTTPRoute` to select the environment.
+3. Nginx serves the React application and forwards API requests to the Node.js service.
+4. The API executes SQL queries against the managed PostgreSQL database.
+5. The response follows the same path back to the browser.
+6. Plain HTTP is redirected to HTTPS.
+
+Each namespace uses default-deny network policies that permit only the required traffic paths: Gateway to web and web to API.
 
 ---
 
-## 🧱 Infrastructure
+## Repository Structure
 
-The whole platform is created by one script, [`infra/setup-azure.sh`](infra/setup-azure.sh), in a few minutes instead of clicking through the portal resource by resource. [`infra/teardown.sh`](infra/teardown.sh) removes everything again.
-
-```mermaid
-flowchart TB
-    S["⚙️ infra/setup-azure.sh"]
-    S --> RG["1 · Resource Group<br/>Central India"]
-    RG --> R2["2 · ACR<br/>Docker images"]
-    RG --> R3["3 · Log Analytics<br/>logs + metrics"]
-    RG --> R4["4 · AKS<br/>Cilium · Gateway API · Autoscaler 2→3 nodes"]
-    RG --> R5["5 · Key Vault<br/>DB + app secrets"]
-    RG --> R6["6 · Azure PostgreSQL<br/>managed, outside the cluster"]
-    RG --> R7["7 · Service Principal<br/>pipeline identity"]
-    R4 --> R8["8 · Shared Gateway<br/>cert-manager · network policies"]
-    RG --> R9["9 · Azure DNS zone<br/>+ Let's Encrypt SSL"]
-    RG --> R10["10 · Self-hosted agent VM<br/>runs the pipeline jobs"]
-
-    classDef step fill:#f5f3ff,stroke:#7c3aed,color:#2e1065
-    classDef start fill:#7c3aed,stroke:#5b21b6,color:#ffffff
-    class S start
-    class RG,R2,R3,R4,R5,R6,R7,R8,R9,R10 step
-```
-
-A few decisions worth knowing about:
-
-- **Service principal = an identity for software.** People sign in with a username and password. A pipeline needs an identity too, and that is the service principal. It gets exactly three permissions: Contributor on the resource group (to reach AKS), AcrPush (to push images) and Key Vault Secrets User (to read secrets).
-- **No passwords in YAML.** Database passwords, the JWT secret and the admin password live in Key Vault. The pipeline reads them through a variable group linked to the vault.
-- **Free HTTPS.** Azure has no built-in certificate service like AWS ACM, so cert-manager requests certificates from Let's Encrypt and renews them automatically.
-- **Self-hosted agent.** Microsoft-hosted agents need a free-tier request on new organisations, so our pipeline jobs run on our own small Linux VM with Docker, Azure CLI, kubectl and Trivy installed.
-
----
-
-## 🔄 The CI/CD pipeline
-
-[`azure-pipelines.yml`](azure-pipelines.yml) is the main pipeline. Both deploy stages reuse one template, [`pipelines/templates/deploy-aks.yml`](pipelines/templates/deploy-aks.yml), so the dev deployment is a true rehearsal of the prod one.
-
-```mermaid
-flowchart LR
-    G(["git push<br/>Azure Repos"]) --> CI
-
-    subgraph CI["🧪 CI · test & scan"]
-        direction TB
-        B1["Backend<br/>48 Jest tests<br/>on real PostgreSQL"]
-        B2["Frontend<br/>lint · 18 Vitest tests<br/>production build"]
-        B3["Security<br/>npm audit · Trivy<br/>vulns · secrets · IaC"]
-    end
-
-    CI --> BU["🐳 Build<br/>docker build → Trivy scan<br/>→ push to ACR"]
-    BU --> DD["🚀 Deploy DEV<br/>Key Vault secrets → kubectl apply -k<br/>Gateway check → HTTPS smoke test"]
-    DD --> AP{"✋ Manual approval<br/>shackpulse-prod"}
-    AP -->|approved| DP["🏁 Deploy PROD<br/>same template, prod values"]
-
-    classDef ci fill:#ecfeff,stroke:#0891b2,color:#164e63
-    classDef build fill:#eff6ff,stroke:#2563eb,color:#1e3a8a
-    classDef dev fill:#f0fdf4,stroke:#16a34a,color:#14532d
-    classDef gate fill:#fef9c3,stroke:#ca8a04,color:#713f12
-    classDef prod fill:#fdf2f8,stroke:#db2777,color:#831843
-    class B1,B2,B3 ci
-    class BU build
-    class DD dev
-    class AP gate
-    class DP prod
-```
-
-What makes it production-grade:
-
-- **Quality gates stop bad code early.** If a test fails, or Trivy finds a critical vulnerability or a leaked secret, the pipeline stops before anything is built or deployed.
-- **An image that fails its scan never reaches the registry.** Each image is scanned after it is built and before it is pushed.
-- **Every image is traceable.** Images are tagged with the pipeline run ID and labelled with the commit, so we always know which run built what is running.
-- **Prod waits for a human.** The `shackpulse-prod` environment has an approval check. After dev is deployed and checked, someone approves, and only then does prod deploy. The approval can wait for days.
-- **Deployments are verified.** After applying the manifests, the pipeline confirms the Gateway accepted the route and runs an HTTPS smoke test against the live URL.
-
----
-
-## 🌐 How a request travels through the app
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant DNS as Azure DNS
-    participant GW as Shared Gateway (Envoy)
-    participant Web as web pod (nginx + React)
-    participant API as api pod (Node.js)
-    participant DB as Azure PostgreSQL
-
-    User->>DNS: shackpulse-dev.<domain>
-    DNS-->>User: Gateway public IP
-    User->>GW: HTTPS request
-    Note over GW: Matches the hostname to its listener,<br/>terminates TLS with the cert-manager certificate
-    GW->>Web: HTTPRoute → service shackpulse-web
-    Note over GW,Web: Network policy allows only Gateway → web
-    Web-->>User: React app
-    User->>GW: /api/... call
-    GW->>Web: same route
-    Web->>API: nginx forwards /api to shackpulse-api
-    Note over Web,API: Network policy allows only web → api
-    API->>DB: SQL query (shackpulse_dev)
-    DB-->>API: rows
-    API-->>User: JSON
-```
-
-Plain HTTP is never served: a dedicated `http-to-https` route answers with a redirect. Inside each namespace, a default-deny network policy blocks all incoming traffic, and only two paths are opened: Gateway → web and web → API. Any other pod in the cluster that tries to call our API is blocked. Cilium enforces these rules.
-
----
-
-## ☸️ Kubernetes setup
-
-| | Dev | Prod |
-| --- | --- | --- |
-| Namespace | `shackpulse-dev` | `shackpulse-prod` |
-| URL | `shackpulse-dev.<domain>` | `shackpulse.<domain>` |
-| Database | `shackpulse_dev` | `shackpulse_prod` |
-| API replicas | 1 (HPA up to 2) | 2 (HPA 2 → 5 at 70% CPU) |
-| Demo logins | On | Off |
-
-The manifests use **Kustomize**: a shared `base` and an overlay per environment.
-
-- `k8s/base`: Deployments, Services, HPA, PodDisruptionBudget, network policies and the `HTTPRoute`.
-- `k8s/overlays/dev` and `k8s/overlays/prod`: namespace, config, replica counts and hostname for each environment.
-- `k8s/platform`: the shared Gateway and the Let's Encrypt `ClusterIssuer`, applied once by the setup script.
-
----
-
-## 🗂 Repository structure
-
-```
+```text
 .
-├── azure-pipelines.yml          # Main CI/CD pipeline: CI → Build → Deploy DEV → approval → Deploy PROD
-├── pipelines/templates/
-│   ├── deploy-aks.yml           # Reusable deploy job used by both environments
-│   └── install-trivy.yml        # Installs Trivy on the agent
+├── azure-pipelines.yml          # Main CI/CD pipeline
+├── pipelines/templates/         # Reusable AKS deployment and Trivy templates
 ├── infra/
-│   ├── setup-azure.sh           # Creates the whole Azure platform
-│   └── teardown.sh              # Deletes it again
+│   ├── setup-azure.sh           # Creates Azure platform resources
+│   └── teardown.sh              # Removes provisioned resources
 ├── k8s/
-│   ├── base/                    # Deployments, Services, HPA, PDB, network policies, HTTPRoute
-│   ├── overlays/dev|prod/       # Per-environment Kustomize overlays
-│   └── platform/                # Shared Gateway + Let's Encrypt ClusterIssuer
-├── backend/                     # Node.js 22 + Express 5 API, PostgreSQL, Jest + Supertest tests
-├── frontend/                    # React 19 + Vite, served by unprivileged nginx, Vitest tests
-└── docker-compose.yml           # Run the full stack locally
+│   ├── base/                    # Deployments, services, HPA, PDB, routes and policies
+│   ├── overlays/dev/            # Development namespace configuration
+│   ├── overlays/prod/           # Production namespace configuration
+│   └── platform/                # Shared Gateway and Let's Encrypt ClusterIssuer
+├── backend/
+│   ├── src/                     # API, database, middleware and routes
+│   └── tests/                   # Jest and Supertest test suites
+├── frontend/
+│   ├── src/                     # React application and components
+│   └── src/test/                # Vitest test suites
+└── docker-compose.yml           # Complete local application stack
 ```
 
 ---
 
-## 💻 Run it locally
+## Quick Start
 
-You only need Docker:
+### Prerequisites
+
+- Docker Desktop or Docker Engine
+- Docker Compose
+- 4 GB RAM or more recommended
+- Git
+
+### Run Locally
 
 ```bash
+git clone https://github.com/SathwickDutt/Azure-DevOps-Project.git
+cd Azure-DevOps-Project
 docker compose up --build
 ```
 
-Then open **http://localhost:3000**. The database is created and filled with sample projects, clients and people on first start.
+Open:
 
-- **Admin:** `admin@devopsshack.com` / `Admin@123`
-- **Demo users** (password `Demo@1234`): `rohan.mehta@devopsshack.com` (Project Manager), `arjun.reddy@devopsshack.com` (Member), `divya.krishnan@devopsshack.com` (Viewer)
+```text
+http://localhost:3000
+```
 
-These credentials exist only for local runs. In Azure, every password comes from Key Vault.
+The database is migrated and seeded automatically on first startup.
+
+### Local Demo Accounts
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@devopsshack.com` | `Admin@123` |
+| Project Manager | `rohan.mehta@devopsshack.com` | `Demo@1234` |
+| Member | `arjun.reddy@devopsshack.com` | `Demo@1234` |
+| Viewer | `divya.krishnan@devopsshack.com` | `Demo@1234` |
+
+These credentials are seed data for local Docker runs only.
+
+### Stop the Local Environment
+
+```bash
+docker compose down
+```
+
+To remove local database data as well:
+
+```bash
+docker compose down -v
+```
 
 ---
 
-## 🛠 Tech stack
+## Local Development
 
-| Layer | Tools |
-| --- | --- |
-| Front end | React 19, Vite, nginx (unprivileged) |
-| Back end | Node.js 22, Express 5, JWT auth, PostgreSQL |
-| Testing | Jest + Supertest (48), Vitest (18), oxlint |
-| Security | Trivy (source, images, IaC), npm audit, network policies, Key Vault |
-| Containers | Docker multi-stage builds, Azure Container Registry |
-| Platform | AKS, Cilium, Gateway API, Cluster Autoscaler, HPA, PDB |
-| CI/CD | Azure Repos, Azure Pipelines (YAML), self-hosted agent, environment approvals |
-| Networking | Azure DNS, cert-manager, Let's Encrypt |
-| Observability | Log Analytics, Container Insights, `/metrics`, JSON logs |
+### Backend
 
+```bash
+cd backend
+npm ci
+npm run dev
+```
+
+Backend scripts include migrations, seeds, tests, coverage, and a CI test run:
+
+```bash
+npm run migrate
+npm run seed
+npm test
+npm run test:ci
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Frontend scripts:
+
+```bash
+npm run lint
+npm run test
+npm run test:ci
+npm run build
+npm run preview
+```
+
+---
+
+## Azure Infrastructure
+
+Infrastructure is created through [`infra/setup-azure.sh`](infra/setup-azure.sh) instead of manual resource-by-resource setup.
+
+The script provisions:
+
+1. Azure Resource Group
+2. Azure Container Registry
+3. Log Analytics workspace
+4. AKS cluster with Cilium networking and cluster autoscaling
+5. Azure Key Vault
+6. Managed Azure PostgreSQL Flexible Server
+7. Azure service principal for pipeline identity
+8. Shared Gateway and cert-manager components
+9. Azure DNS zone
+10. Self-hosted Azure Pipelines agent virtual machine
+
+### Infrastructure Requirements
+
+- Azure subscription with permission to create the required resources
+- Azure CLI authenticated to the correct subscription
+- Custom domain for public access
+- Email address for Let's Encrypt notifications
+- Unique names for Azure resources that require global uniqueness
+
+Review resource names, region, domain, and email settings in `infra/setup-azure.sh` before execution.
+
+### Provision Azure Resources
+
+```bash
+cd infra
+bash setup-azure.sh
+```
+
+After provisioning, store the returned subscription, tenant, service-principal, resource, registry, and DNS details securely.
+
+### Remove Azure Resources
+
+```bash
+cd infra
+bash teardown.sh
+```
+
+> Teardown permanently deletes the configured resource group and its resources. Review the script before running it.
+
+---
+
+## CI/CD Pipeline
+
+The pipeline is defined in [`azure-pipelines.yml`](azure-pipelines.yml) and reuses [`pipelines/templates/deploy-aks.yml`](pipelines/templates/deploy-aks.yml) for both environments.
+
+```mermaid
+flowchart LR
+    PUSH[Git Push] --> CI
+
+    subgraph CI[Test and Scan]
+        B[Backend Jest and Supertest]
+        F[Frontend Vitest and Lint]
+        S[npm audit and Trivy]
+    end
+
+    CI --> BUILD[Build Docker Images]
+    BUILD --> SCAN[Scan Images with Trivy]
+    SCAN --> ACR[Push to ACR]
+    ACR --> DEV[Deploy to Dev]
+    DEV --> APPROVAL{Prod Approval}
+    APPROVAL -->|Approved| PROD[Deploy to Prod]
+```
+
+### Pipeline Stages
+
+1. **Backend CI**
+   - Runs 48 Jest/Supertest tests against a real PostgreSQL test container
+   - Publishes test results and coverage
+
+2. **Frontend CI**
+   - Runs oxlint
+   - Runs 18 Vitest tests
+   - Creates a production build
+
+3. **Security checks**
+   - Audits npm dependencies
+   - Scans source files for vulnerabilities and secrets
+   - Scans Kubernetes manifests and Dockerfiles
+
+4. **Image build**
+   - Builds API and web container images
+   - Scans critical vulnerabilities with Trivy
+   - Pushes images to Azure Container Registry
+
+5. **Dev deployment**
+   - Retrieves secrets from Azure Key Vault
+   - Applies the Kustomize environment overlay
+   - Waits for API and web rollouts
+   - Verifies Gateway routing and TLS readiness
+   - Runs an HTTPS smoke test
+
+6. **Prod deployment**
+   - Requires approval in the `shackpulse-prod` Azure DevOps environment
+   - Applies the same tested deployment process with production values
+
+### Pipeline Security
+
+- Pull requests do not build or push container images
+- Images are tagged with the Azure DevOps build ID
+- Images include source revision and repository labels
+- Database passwords, JWT secrets, and seed credentials come from Key Vault
+- Service-principal permissions are limited to the resources required by the pipeline
+- An approval check protects every production deployment
+
+---
+
+## Kubernetes Configuration
+
+| Setting | Dev | Prod |
+|---|---|---|
+| Namespace | `shackpulse-dev` | `shackpulse-prod` |
+| Hostname | `shackpulse-dev.<domain>` | `shackpulse.<domain>` |
+| Database | `shackpulse_dev` | `shackpulse_prod` |
+| API Replicas | 1, HPA up to 2 | 2, HPA up to 5 |
+| Demo Logins | Enabled locally | Disabled by environment configuration |
+
+The manifests use Kustomize:
+
+- `k8s/base` — shared deployments, services, HPA, PDB, network policies, and HTTPRoute
+- `k8s/overlays/dev` — development namespace and values
+- `k8s/overlays/prod` — production namespace and values
+- `k8s/platform` — shared Gateway and Let's Encrypt ClusterIssuer
+
+### Operations Endpoints
+
+- `GET /healthz` — process health
+- `GET /readyz` — database readiness
+- `GET /metrics` — Prometheus-style application metrics
+
+---
+
+## Testing
+
+Run backend tests:
+
+```bash
+cd backend
+npm ci
+npm run test:ci
+```
+
+Run frontend tests and lint:
+
+```bash
+cd frontend
+npm ci
+npm run lint
+npm run test:ci
+npm run build
+```
+
+The frontend and backend test suites also run in the Azure pipeline before image builds and deployments.
+
+---
+
+## Configuration
+
+Azure and Kubernetes configuration is supplied through pipeline variables, Kustomize overlays, environment variables, and Azure Key Vault.
+
+Typical application values include:
+
+```text
+DB_HOST
+DB_PORT
+DB_NAME
+DB_USER
+DB_PASSWORD
+JWT_SECRET
+ADMIN_PASSWORD
+ACR_LOGIN_SERVER
+APP_HOST
+APP_VERSION
+BUILD_ID
+COMMIT_SHA
+```
+
+Do not commit real database passwords, JWT secrets, service-principal secrets, or Azure credentials to the repository.
+
+---
+
+## Cleanup
+
+Remove the local containers and volumes:
+
+```bash
+docker compose down -v
+```
+
+Delete the Azure environment:
+
+```bash
+cd infra
+bash teardown.sh
+```
+
+---
+
+## Contributing
+
+1. Fork the repository.
+2. Create a feature branch.
+3. Run frontend and backend tests before submitting changes.
+4. Ensure Docker and Kubernetes configuration validation passes.
+5. Open a pull request with a clear summary and test evidence.
+
+---
+
+## Author
+
+Built as a complete DevOps hands-on project for the **DevOps Shack** community.
+
+- GitHub: https://github.com/SathwickDutt
+- YouTube: https://www.youtube.com/@devopsshack
+
+---
+
+## License
+
+This project is currently distributed with an `UNLICENSED` package configuration. Add a `LICENSE` file if you intend to publish it for public reuse.
