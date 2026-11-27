@@ -14,24 +14,28 @@
 set -euo pipefail
 
 # ---------- 0. Names and sizes (ACR + Key Vault names must be globally unique: add a suffix if taken) ----------
-LOCATION=${LOCATION:-centralindia}
-RG=${RG:-rg-devopsshack-shackpulse}
-ACR=${ACR:-acrdevopsshackpulse}            # 5-50 lowercase letters/numbers
-AKS=${AKS:-aks-devopsshack-shackpulse}
-LAW=${LAW:-law-devopsshack-shackpulse}
-PG=${PG:-psql-devopsshack-shackpulse}      # gets a region suffix if it has to fall back to another region
-PG_ADMIN=${PG_ADMIN:-shackpulseadmin}
-KV=${KV:-kv-shackpulse}                    # 3-24 chars
-SP_NAME=${SP_NAME:-sp-shackpulse-azure-devops}
-NODE_SIZE=${NODE_SIZE:-Standard_D2as_v6}   # 2 vCPU / 8 GiB (Dasv6 family). 4 GiB nodes are too small: istiod (Gateway API) does not fit
+
+LOCATION=${LOCATION:-southindia}
+RG=${RG:-rg-sathwick-shackpulse}
+ACR=${ACR:-acrsathwickpulse}              # 5-50 lowercase letters/numbers
+AKS=${AKS:-aks-sathwick-shackpulse}
+LAW=${LAW:-law-sathwick-shackpulse}
+PG=${PG:-psql-sathwick-shackpulse}        # gets a region suffix if it falls back
+PG_ADMIN=${PG_ADMIN:-sathwickadmin}
+KV=${KV:-kv-sathwick}                     # 3-24 chars
+SP_NAME=${SP_NAME:-sp-sathwick-azure-devops}
+NODE_SIZE=${NODE_SIZE:-Standard_D2as_v6}  # 2 vCPU / 8 GiB
 NODE_MIN=${NODE_MIN:-2}
-NODE_MAX=${NODE_MAX:-3}                    # set NODE_MAX=2 if your quota for the family is only 4 vCPUs
+NODE_MAX=${NODE_MAX:-3}                   # set NODE_MAX=2 if quota is only 4 vCPUs
+
 # PostgreSQL: tried in order until one is accepted (tier:sku:region). New subscriptions are often
 # blocked from Burstable sizes in one region, so we fall back instead of failing.
 PG_CHOICES=${PG_CHOICES:-"Burstable:Standard_B1ms:$LOCATION Burstable:Standard_B1ms:southindia Burstable:Standard_B2s:$LOCATION Burstable:Standard_B2s:southindia GeneralPurpose:Standard_D2ds_v5:$LOCATION"}
+
 # Your domain becomes an Azure DNS zone. Sites: shackpulse-dev.<APP_DOMAIN> and shackpulse.<APP_DOMAIN>
 APP_DOMAIN=${APP_DOMAIN:-prod-demo-99.site}
-LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-office@devopsshack.com}   # Let's Encrypt sends expiry notices here
+LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-ksdutt6773@gmail.com}
+
 
 step() { echo; echo "==> [$(date +%H:%M:%S)] $*"; }
 exists() { "$@" -o none >/dev/null 2>&1; }
