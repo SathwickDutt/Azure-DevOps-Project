@@ -3,7 +3,7 @@
 #   bash infra/teardown.sh pause    stop AKS, PostgreSQL and the agent VM (storage still costs a little)
 #   bash infra/teardown.sh resume   start them again
 #   bash infra/teardown.sh delete   delete the whole resource group and the service principal
-RG=${RG:-rg-devopsshack-shackpulse}; AKS=${AKS:-aks-devopsshack-shackpulse}; VM=${VM:-vm-shackpulse-agent}
+RG=${RG:-rg-sathwick-shackpulse}; AKS=${AKS:-aks-sathwick-shackpulse}; VM=${VM:-vm-shackpulse-agent}
 KV=${KV:-kv-shackpulse}; SP_NAME=${SP_NAME:-sp-shackpulse-azure-devops}
 PG=$(az postgres flexible-server list -g $RG --query "[0].name" -o tsv 2>/dev/null)   # may carry a region suffix
 case "${1:-}" in
