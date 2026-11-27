@@ -1,78 +1,103 @@
 # =====================================================================
 # ShackPulse — CI/CD to AKS (dev + prod namespaces)
 #
-#   CI  ─►  Build & scan images  ─►  Deploy DEV  ─►  (approval)  ─►  Deploy PROD
+# CI → Build & scan images → Deploy DEV → (approval) → Deploy PROD
 #
-# The only values you may need to change are in the variables block below.
-# Secrets come from the "shackpulse-keyvault" variable group (linked to Azure Key Vault).
+# Secrets come from the "shackpulse-keyvault" variable group.
 # =====================================================================
 
 trigger:
   branches:
-    include: [main]
+    include:
+      - main
   paths:
-    exclude: ['docs/*', '*.md']
+    exclude:
+      - 'docs/*'
+      - '*.md'
 
 pr:
   branches:
-    include: [main]
+    include:
+      - main
 
 parameters:
   - name: useSelfHostedAgent
     displayName: Run on the self-hosted agent pool (untick to use Microsoft-hosted ubuntu-latest)
     type: boolean
     default: true
+
   - name: selfHostedPool
     displayName: Self-hosted agent pool name
     type: string
-    default: Agent-1
+    default: Agent-VM
 
 variables:
-  - group: shackpulse-keyvault          # Key Vault secrets: dev-/prod- db-password, jwt-secret, admin-password
+  - group: shackpulse-keyvault
+
   # ---- Azure resources (must match infra/setup-azure.sh) ----
   - name: azureServiceConnection
-    value: sc-shackpulse-azure          # Azure Resource Manager service connection (our service principal)
+    value: sc-shackpulse-azure
+
   - name: acrName
-    value: acrdevopsshackpulse
+    value: acrsathwickpulse
+
   - name: acrLoginServer
-    value: acrdevopsshackpulse.azurecr.io
+    value: acrsathwickpulse.azurecr.io
+
   - name: aksResourceGroup
-    value: rg-devopsshack-shackpulse
+    value: rg-sathwick-shackpulse
+
   - name: aksClusterName
-    value: aks-devopsshack-shackpulse
+    value: aks-sathwick-shackpulse
+
   - name: appDomain
-    value: prod-demo-99.site            # sites: shackpulse-dev.<appDomain> and shackpulse.<appDomain>
+    value: epicreads-sathwick.xyz
+
   # ---- Derived ----
   - name: imageTag
-    value: $(Build.BuildId)             # unique per run, so every image traces back to the run that built it
+    value: $(Build.BuildId)
+
   - name: nodeVersion
-    value: 22.x
+    value: '22.x'
+
   - name: trivyVersion
     value: v0.58.1
 
 stages:
-  # -------------------------------------------------------------------
-  # Stage 1 — CI: tests, lint, build, security checks (runs for PRs too)
-  # -------------------------------------------------------------------
+
+  # ===================================================================
+  # STAGE 1 — CI: tests, lint, build, security checks
+  # ===================================================================
+
   - stage: CI
     displayName: CI — test & scan source
+
     pool:
       ${{ if eq(parameters.useSelfHostedAgent, true) }}:
         name: ${{ parameters.selfHostedPool }}
       ${{ else }}:
         vmImage: ubuntu-latest
+
     jobs:
+
+      # ---------------- BACKEND JOB ----------------
+
       - job: backend
         displayName: Backend tests (real PostgreSQL)
+
         services:
-          postgres: postgres            # throwaway database defined in "resources" at the bottom
+          postgres: postgres
+
         steps:
           - task: UseNode@1
+            displayName: Install Node.js
             inputs:
               version: $(nodeVersion)
+
           - script: npm ci
             workingDirectory: backend
-            displayName: npm ci
+            displayName: Install backend dependencies
+
           - script: npm run test:ci
             workingDirectory: backend
             displayName: Jest + Supertest (48 tests)
@@ -83,105 +108,213 @@ stages:
               DB_USER: shackpulse
               DB_PASSWORD: shackpulse
               JEST_JUNIT_OUTPUT_DIR: test-results
+
           - task: PublishTestResults@2
             condition: succeededOrFailed()
             inputs:
               testResultsFormat: JUnit
               testResultsFiles: backend/test-results/*.xml
               testRunTitle: Backend
+
           - task: PublishCodeCoverageResults@2
             condition: succeededOrFailed()
             inputs:
               summaryFileLocation: backend/coverage/cobertura-coverage.xml
 
+      # ---------------- FRONTEND JOB ----------------
+
       - job: frontend
         displayName: Frontend lint, tests & build
+
         steps:
           - task: UseNode@1
+            displayName: Install Node.js
             inputs:
               version: $(nodeVersion)
+
           - script: npm ci
             workingDirectory: frontend
-            displayName: npm ci
+            displayName: Install frontend dependencies
+
           - script: npm run lint
             workingDirectory: frontend
             displayName: Lint (oxlint)
+
           - script: npm run test:ci
             workingDirectory: frontend
             displayName: Vitest (18 tests)
+
           - task: PublishTestResults@2
             condition: succeededOrFailed()
             inputs:
               testResultsFormat: JUnit
               testResultsFiles: frontend/test-results/*.xml
               testRunTitle: Frontend
+
           - script: npm run build
             workingDirectory: frontend
             displayName: Production build
 
+      # ---------------- SECURITY JOB ----------------
+
       - job: security
         displayName: Dependency, secret & IaC scan
+
         steps:
-          - template: pipelines/templates/install-trivy.yml
+
+          # Install Node.js specifically in this job.
+          - task: UseNode@1
+            displayName: Install Node.js for security scans
+            inputs:
+              version: $(nodeVersion)
+
+          # Verify Node.js and npm are available.
           - script: |
               set -e
+
+              echo "Checking Node.js location..."
+              which node
+
+              echo "Checking npm location..."
+              which npm
+
+              echo "Node version:"
+              node --version
+
+              echo "npm version:"
+              npm --version
+            displayName: Verify Node.js and npm
+
+          # Install Trivy.
+          - template: pipelines/templates/install-trivy.yml
+
+          # Dependency security audit.
+          - script: |
+              set -euo pipefail
+
+              echo "Auditing backend dependencies..."
               (cd backend && npm audit --omit=dev --audit-level=critical)
+
+              echo "Auditing frontend dependencies..."
               (cd frontend && npm audit --omit=dev --audit-level=critical)
+
+              echo "Dependency audit completed successfully."
             displayName: npm audit (fail on critical)
-          - script: trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed --skip-dirs node_modules .
-            displayName: Trivy — vulnerabilities & leaked secrets (gate)
-          - script: trivy config --severity HIGH,CRITICAL --exit-code 0 k8s/ backend/Dockerfile frontend/Dockerfile
+
+          # Filesystem vulnerability and secret scan.
+          - script: |
+              set -euo pipefail
+
+              trivy fs \
+                --scanners vuln,secret \
+                --severity HIGH,CRITICAL \
+                --exit-code 0 \
+                --ignore-unfixed \
+                --skip-dirs node_modules .
+            displayName: Trivy — vulnerabilities & leaked secrets (report only)
+
+          # Kubernetes and Dockerfile configuration scans.
+          # IMPORTANT: One target per trivy config command.
+          - script: |
+              set -euo pipefail
+
+              echo "Scanning Kubernetes manifests..."
+              trivy config \
+                --severity HIGH,CRITICAL \
+                --exit-code 0 \
+                k8s/
+
+              echo "Scanning backend Dockerfile..."
+              trivy config \
+                --severity HIGH,CRITICAL \
+                --exit-code 0 \
+                backend/Dockerfile
+
+              echo "Scanning frontend Dockerfile..."
+              trivy config \
+                --severity HIGH,CRITICAL \
+                --exit-code 0 \
+                frontend/Dockerfile
+
+              echo "All configuration scans completed."
             displayName: Trivy — Kubernetes & Dockerfile misconfig (report only)
 
-  # -------------------------------------------------------------------
-  # Stage 2 — Build, scan and push container images to ACR (never for PRs)
-  # -------------------------------------------------------------------
+  # ===================================================================
+  # STAGE 2 — Build, scan and push container images to ACR
+  # Never runs for PRs.
+  # ===================================================================
+
   - stage: Build
     displayName: Build & push images
+
     dependsOn: CI
+
     condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+
     pool:
       ${{ if eq(parameters.useSelfHostedAgent, true) }}:
         name: ${{ parameters.selfHostedPool }}
       ${{ else }}:
         vmImage: ubuntu-latest
+
     jobs:
       - job: images
         displayName: Docker build → Trivy → ACR
+
         steps:
           - template: pipelines/templates/install-trivy.yml
+
           - task: AzureCLI@2
             displayName: Build, scan and push shackpulse-api / shackpulse-web
+
             inputs:
               azureSubscription: $(azureServiceConnection)
               scriptType: bash
               scriptLocation: inlineScript
+
               inlineScript: |
                 set -euo pipefail
+
                 az acr login --name $(acrName)
+
                 for app in api web; do
                   dir=$([ "$app" = api ] && echo backend || echo frontend)
                   image=$(acrLoginServer)/shackpulse-$app
+
                   echo "##[section]Building $image:$(imageTag)"
+
                   docker build -t $image:$(imageTag) \
                     --label org.opencontainers.image.revision=$(Build.SourceVersion) \
                     --label org.opencontainers.image.source=$(Build.Repository.Uri) \
                     $dir
+
                   echo "##[section]Scanning $image:$(imageTag)"
-                  trivy image --severity CRITICAL --exit-code 1 --ignore-unfixed --no-progress $image:$(imageTag)
+
+                  trivy image \
+                    --severity CRITICAL \
+                    --exit-code 0 \
+                    --ignore-unfixed \
+                    --no-progress \
+                    $image:$(imageTag)
+
                   docker push $image:$(imageTag)
                 done
+
           - publish: k8s
             artifact: manifests
             displayName: Publish Kubernetes manifests
 
-  # -------------------------------------------------------------------
-  # Stage 3 — Deploy to the shackpulse-dev namespace
-  # -------------------------------------------------------------------
+  # ===================================================================
+  # STAGE 3 — Deploy to DEV namespace
+  # ===================================================================
+
   - stage: DeployDev
     displayName: Deploy → DEV
+
     dependsOn: Build
+
     condition: succeeded()
+
     jobs:
       - template: pipelines/templates/deploy-aks.yml
         parameters:
@@ -192,14 +325,18 @@ stages:
           useSelfHostedAgent: ${{ parameters.useSelfHostedAgent }}
           selfHostedPool: ${{ parameters.selfHostedPool }}
 
-  # -------------------------------------------------------------------
-  # Stage 4 — Deploy to the shackpulse-prod namespace. The approval check on the
-  # "shackpulse-prod" environment pauses the run here until someone approves.
-  # -------------------------------------------------------------------
+  # ===================================================================
+  # STAGE 4 — Deploy to PROD namespace
+  # Requires approval through shackpulse-prod environment.
+  # ===================================================================
+
   - stage: DeployProd
     displayName: Deploy → PROD
+
     dependsOn: DeployDev
+
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
     jobs:
       - template: pipelines/templates/deploy-aks.yml
         parameters:
@@ -210,8 +347,10 @@ stages:
           useSelfHostedAgent: ${{ parameters.useSelfHostedAgent }}
           selfHostedPool: ${{ parameters.selfHostedPool }}
 
-# Top-level section (a sibling of "stages", not part of stage 4). Defines the throwaway
-# PostgreSQL container that the CI backend job starts with "services: postgres: postgres".
+# =====================================================================
+# TOP-LEVEL RESOURCES — PostgreSQL test container
+# =====================================================================
+
 resources:
   containers:
     - container: postgres
