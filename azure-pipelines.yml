@@ -3,7 +3,7 @@
 #
 # CI → Build & scan images → Deploy DEV → (approval) → Deploy PROD
 #
-# Secrets come from the "shackpulse-keyvault" variable group.
+# Secrets come from the "shackpulse-keyvault" variable group
 # =====================================================================
 
 trigger:
