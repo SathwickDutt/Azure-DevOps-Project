@@ -6,13 +6,6 @@
 
 **Azure DevOps** · **AKS** · **Gateway API** · **Cilium** · **Key Vault** · **Azure PostgreSQL** · **Trivy** · **cert-manager**
 
-[![YouTube](https://img.shields.io/badge/YouTube-DevOps%20Shack-red?logo=youtube)](https://www.youtube.com/@devopsshack)
-[![Batch 16](https://img.shields.io/badge/Batch%2016-Enroll%20now-7c3aed)](https://devopsshack.com)
-[![Azure DevOps](https://img.shields.io/badge/CI%2FCD-Azure%20DevOps-0078D7?logo=azuredevops)](#-the-cicd-pipeline)
-[![AKS](https://img.shields.io/badge/Runs%20on-AKS-326CE5?logo=kubernetes&logoColor=white)](#-architecture)
-
-</div>
-
 ---
 
 ## 📌 What is this project?
