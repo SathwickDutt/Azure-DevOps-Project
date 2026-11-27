@@ -454,15 +454,6 @@ bash teardown.sh
 
 ---
 
-## Author
-
-Built as a complete DevOps hands-on project for the **DevOps Shack** community.
-
-- GitHub: https://github.com/SathwickDutt
-- YouTube: https://www.youtube.com/@devopsshack
-
----
-
 ## License
 
 This project is currently distributed with an `UNLICENSED` package configuration. Add a `LICENSE` file if you intend to publish it for public reuse.
