@@ -442,18 +442,3 @@ cd infra
 bash teardown.sh
 ```
 
----
-
-## Contributing
-
-1. Fork the repository.
-2. Create a feature branch.
-3. Run frontend and backend tests before submitting changes.
-4. Ensure Docker and Kubernetes configuration validation passes.
-5. Open a pull request with a clear summary and test evidence.
-
----
-
-## License
-
-This project is currently distributed with an `UNLICENSED` package configuration. Add a `LICENSE` file if you intend to publish it for public reuse.
