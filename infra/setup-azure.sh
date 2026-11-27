@@ -21,9 +21,9 @@ ACR=${ACR:-acrsathwickpulse}              # 5-50 lowercase letters/numbers
 AKS=${AKS:-aks-sathwick-shackpulse}
 LAW=${LAW:-law-sathwick-shackpulse}
 PG=${PG:-psql-sathwick-shackpulse}        # gets a region suffix if it falls back
-PG_ADMIN=${PG_ADMIN:-sathwickadmin}
-KV=${KV:-kv-sathwick}                     # 3-24 chars
-SP_NAME=${SP_NAME:-sp-sathwick-azure-devops}
+PG_ADMIN=${PG_ADMIN:-shackpulseadmin}
+KV=${KV:-kv-shackpulse}                     # 3-24 chars
+SP_NAME=${SP_NAME:-sp-shackpulse-azure-devops}
 NODE_SIZE=${NODE_SIZE:-Standard_D2as_v6}  # 2 vCPU / 8 GiB
 NODE_MIN=${NODE_MIN:-2}
 NODE_MAX=${NODE_MAX:-3}                   # set NODE_MAX=2 if quota is only 4 vCPUs
