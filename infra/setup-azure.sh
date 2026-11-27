@@ -33,7 +33,7 @@ NODE_MAX=${NODE_MAX:-3}                   # set NODE_MAX=2 if quota is only 4 vC
 PG_CHOICES=${PG_CHOICES:-"Burstable:Standard_B1ms:$LOCATION Burstable:Standard_B1ms:southindia Burstable:Standard_B2s:$LOCATION Burstable:Standard_B2s:southindia GeneralPurpose:Standard_D2ds_v5:$LOCATION"}
 
 # Your domain becomes an Azure DNS zone. Sites: shackpulse-dev.<APP_DOMAIN> and shackpulse.<APP_DOMAIN>
-APP_DOMAIN=${APP_DOMAIN:-prod-demo-99.site}
+APP_DOMAIN=${APP_DOMAIN:-epicreads-sathwick.xyz}
 LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-ksdutt6773@gmail.com}
 
 
