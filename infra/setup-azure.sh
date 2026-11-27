@@ -15,18 +15,19 @@ set -euo pipefail
 
 # ---------- 0. Names and sizes (ACR + Key Vault names must be globally unique: add a suffix if taken) ----------
 
-LOCATION=${LOCATION:-southindia}
+LOCATION=${LOCATION:-centralindia}
 RG=${RG:-rg-sathwick-shackpulse}
 ACR=${ACR:-acrsathwickpulse}              # 5-50 lowercase letters/numbers
 AKS=${AKS:-aks-sathwick-shackpulse}
 LAW=${LAW:-law-sathwick-shackpulse}
 PG=${PG:-psql-sathwick-shackpulse}        # gets a region suffix if it falls back
-PG_ADMIN=${PG_ADMIN:-shackpulseadmin}
-KV=${KV:-kv-shackpulse}                     # 3-24 chars
-SP_NAME=${SP_NAME:-sp-shackpulse-azure-devops}
-NODE_SIZE=${NODE_SIZE:-Standard_D2as_v6}  # 2 vCPU / 8 GiB
-NODE_MIN=${NODE_MIN:-2}
-NODE_MAX=${NODE_MAX:-3}                   # set NODE_MAX=2 if quota is only 4 vCPUs
+PG_ADMIN=${PG_ADMIN:-sathwickadmin}
+KV=${KV:-kv-sathwick}                     # 3-24 chars
+SP_NAME=${SP_NAME:-sp-sathwick-azure-devops}
+NODE_SIZE=${NODE_SIZE:-Standard_D2as_v5}  # 2 vCPU / 8 GiB
+NODE_MIN=${NODE_MIN:-1}
+NODE_MAX=${NODE_MAX:-2}                   # subscription quota: 4 DASv5 vCPUs
+AKS_ZONE=${AKS_ZONE:-1}
 
 # PostgreSQL: tried in order until one is accepted (tier:sku:region). New subscriptions are often
 # blocked from Burstable sizes in one region, so we fall back instead of failing.
@@ -44,12 +45,15 @@ step "Using subscription: $(az account show --query name -o tsv)"
 SUB_ID=$(az account show --query id -o tsv)
 TENANT_ID=$(az account show --query tenantId -o tsv)
 ME=$(az ad signed-in-user show --query id -o tsv)
+if [ "$NODE_MIN" -lt 1 ] || [ "$NODE_MAX" -lt "$NODE_MIN" ] || [ "$NODE_MAX" -gt 2 ]; then
+  echo "Unsafe node range NODE_MIN=$NODE_MIN NODE_MAX=$NODE_MAX. This subscription has 4 DASv5 vCPUs; use 1..2 nodes."; exit 1
+fi
 # The managed Gateway API flags (--enable-gateway-api, --enable-app-routing-istio) need Azure CLI 2.86.0+.
 AZ_VER=$(az version --query '"azure-cli"' -o tsv)
 if [ "$(printf '%s\n2.86.0\n' "$AZ_VER" | sort -V | head -1)" != "2.86.0" ]; then
   echo "Azure CLI $AZ_VER is too old for the managed Gateway API. Run 'az upgrade' (Cloud Shell updates itself regularly)."; exit 1
 fi
-for tool in kubectl helm psql openssl; do
+for tool in kubectl helm psql openssl python3 curl; do
   command -v $tool >/dev/null || { echo "Missing $tool. Azure Cloud Shell has all of these; run the script there."; exit 1; }
 done
 
@@ -82,21 +86,45 @@ LAW_ID=$(az monitor log-analytics workspace show -g $RG -n $LAW --query id -o ts
 step "4/11 AKS cluster $AKS (2 vCPU / 8 GiB nodes) with the managed Gateway API (10-15 minutes, this is the long one)"
 if exists az aks show -g $RG -n $AKS; then echo "    exists, skipping create"
 else
-  # Pick the first 8 GiB node size this subscription can use in $LOCATION (some sizes are restricted
-  # for new subscriptions). All of these are 2 vCPU / 8 GiB, enough for istiod and the Envoy proxies.
+  # Check subscription-specific SKU restrictions by zone. D2as_v5 is restricted in
+  # Zones 2 and 3 for this subscription, but Zone 1 was not listed as restricted.
   chosen=""
-  for size in $NODE_SIZE Standard_D2as_v5 Standard_D2s_v5 Standard_D2ds_v5; do
-    ok=$(az vm list-skus -l $LOCATION --resource-type virtualMachines --size $size \
-         --query "[?name=='$size' && length(restrictions)==\`0\`].name | [0]" -o tsv 2>/dev/null || true)
-    if [ "$ok" = "$size" ]; then chosen=$size; break; fi
-    echo "    $size is not available to this subscription in $LOCATION, trying the next size"
+  chosen_zone=""
+  for size in "$NODE_SIZE" Standard_D2as_v5 Standard_D2s_v5 Standard_D2ds_v5; do
+    sku_json=$(az vm list-skus -l "$LOCATION" --resource-type virtualMachines --size "$size" --all -o json 2>/dev/null || echo '[]')
+    result=$(SKU_JSON="$sku_json" SKU_NAME="$size" python3 - <<'PYJSON'
+import json, os
+try: items=json.loads(os.environ['SKU_JSON'])
+except Exception: items=[]
+for item in items:
+    if item.get('name') != os.environ['SKU_NAME']: continue
+    restrictions=item.get('restrictions') or []
+    if not restrictions:
+        print('AVAILABLE|'); raise SystemExit
+    allowed=True
+    for r in restrictions:
+        info=r.get('restrictionInfo') or {}
+        zones=set(str(z) for z in (info.get('zones') or []))
+        if r.get('type') != 'Zone' or '1' in zones:
+            allowed=False; break
+    print('AVAILABLE|1' if allowed else 'BLOCKED|')
+    raise SystemExit
+print('MISSING|')
+PYJSON
+)
+    status=${result%%|*}; zone=${result#*|}
+    if [ "$status" = "AVAILABLE" ]; then chosen=$size; chosen_zone=$zone; break; fi
+    echo "    $size cannot be used in Zone 1 for this subscription; trying the next size"
   done
-  [ -n "$chosen" ] || { echo "None of the 8 GiB node sizes is available in $LOCATION. Set NODE_SIZE=<a 2 vCPU / 8 GiB size> and re-run."; exit 1; }
+  [ -n "$chosen" ] || { echo "No candidate 2-vCPU SKU is available in Zone 1 of $LOCATION. AKS was not created."; exit 1; }
   [ "$chosen" = "$NODE_SIZE" ] || echo "    using $chosen instead of $NODE_SIZE"
   NODE_SIZE=$chosen
-  az aks create -g $RG -n $AKS -l $LOCATION \
+  [ -z "$chosen_zone" ] || AKS_ZONE=$chosen_zone
+  echo "    selected $NODE_SIZE in Zone $AKS_ZONE; autoscaler range $NODE_MIN-$NODE_MAX"
+  az aks create -g "$RG" -n "$AKS" -l "$LOCATION" \
     --tier free \
-    --node-count $NODE_MIN --node-vm-size $NODE_SIZE \
+    --node-count "$NODE_MIN" --node-vm-size "$NODE_SIZE" \
+    --zones "$AKS_ZONE" \
     --enable-cluster-autoscaler --min-count $NODE_MIN --max-count $NODE_MAX \
     --network-plugin azure --network-plugin-mode overlay --network-dataplane cilium \
     --enable-gateway-api --enable-app-routing-istio \
@@ -128,7 +156,7 @@ if [ "${running:-0}" -lt 1 ]; then
   kubectl -n aks-istio-system get pods
   kubectl get events -n aks-istio-system --sort-by=.lastTimestamp | tail -5
   echo "istiod is not running (see the events above). If they say 'Insufficient memory', the nodes are too small:"
-  echo "  az aks nodepool add -g $RG --cluster-name $AKS -n pool8g --mode System --node-vm-size Standard_D2as_v6 \\"
+  echo "  az aks nodepool add -g $RG --cluster-name $AKS -n pool8g --mode System --node-vm-size $NODE_SIZE \\"
   echo "    --node-count 2 --enable-cluster-autoscaler --min-count 2 --max-count 3"
   echo "  az aks nodepool delete -g $RG --cluster-name $AKS -n nodepool1     # after the new nodes are Ready"
   echo "Then run this script again."
@@ -164,6 +192,9 @@ secret prod-admin-password "Prod-$(gen 12)1!" >/dev/null
 
 step "6/11 PostgreSQL Flexible Server (5-10 minutes)"
 # ---------- 6. PostgreSQL Flexible Server (32 GiB, PG 16) + two databases ----------
+# Permit the current machine to connect to PostgreSQL from WSL/Cloud Shell.
+CLIENT_IP=$(curl -fsS https://api.ipify.org)
+[[ "$CLIENT_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || { echo "Could not determine public IPv4 address."; exit 1; }
 # If a server already exists (an earlier run), wait for it to finish; recreate it only if it is broken.
 # Some az versions print "ResourceNotFound" and still exit 0 for postgres, so trust only a real state word.
 pg_state() { az postgres flexible-server show -g $RG -n $PG --query state -o tsv 2>/dev/null | grep -xE '[A-Za-z]+' || true; }
@@ -257,6 +288,10 @@ else
   done
   [ -n "$created" ] || { echo "None of PG_CHOICES could be created. Run: az postgres flexible-server list-skus -l <region> -o table"; exit 1; }
   echo "    created: $created"
+fi
+# 0.0.0.0 enables Azure-hosted services; this rule additionally allows only this client IP.
+if ! az postgres flexible-server firewall-rule list -g "$RG" -s "$PG" --query "[?startIpAddress=='$CLIENT_IP' && endIpAddress=='$CLIENT_IP'].name | [0]" -o tsv | grep -q .; then
+  az postgres flexible-server firewall-rule create -g "$RG" -s "$PG" -n "client-$(echo "$CLIENT_IP" | tr . --)" --start-ip-address "$CLIENT_IP" --end-ip-address "$CLIENT_IP" -o none
 fi
 # Newer az versions name the database with --name, older ones with --database-name; try both.
 for d in shackpulse_dev shackpulse_prod; do
@@ -394,9 +429,11 @@ spec:
     - name: http
       protocol: HTTP
       port: 80
+      # cert-manager creates temporary HTTPRoutes in its own namespace for ACME HTTP-01.
+      # Allow HTTP routes here; HTTPS listeners below remain restricted to their app namespaces.
       allowedRoutes:
         namespaces:
-          from: Same
+          from: All
     # https://shackpulse-dev.<domain>: only routes from the shackpulse-dev namespace may attach.
     - name: https-dev
       protocol: HTTPS
