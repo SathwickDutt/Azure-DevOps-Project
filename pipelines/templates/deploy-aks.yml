@@ -14,7 +14,7 @@ parameters:
     default: true
   - name: selfHostedPool
     type: string
-    default: Agent-1
+    default: Agent-VM
 
 jobs:
   - deployment: deploy_${{ parameters.environment }}
